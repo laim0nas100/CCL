@@ -7,8 +7,11 @@
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,10 +35,8 @@ import javax.imageio.ImageIO;
  */
 public class CCL {
 
-    
-    public static final int THREAD_COUNT = 20;
+    public static ArrayList<String> log = new ArrayList<>();
     public static ExecutorService pool;
-    public static HashSet<String> set = new HashSet<>();
     public static int length,width;
     public static int charInt = 33;
     public static final int CORE_COUNT = Runtime.getRuntime().availableProcessors();
@@ -183,7 +184,7 @@ public class CCL {
             pool.awaitTermination(1, TimeUnit.DAYS); 
         }
         
-        pool = Executors.newFixedThreadPool(THREAD_COUNT);
+        pool = Executors.newFixedThreadPool(CORE_COUNT);
         for(Callable c:list){
             pool.submit(c);
         }
@@ -202,19 +203,25 @@ public class CCL {
      */
     public static void main(String[] args) throws Exception{
         
-        if(args.length<2){
+        if(args.length<3){
             System.out.println("Failed arguments");
             System.exit(1);
         }
-        System.out.println("Core count "+CORE_COUNT);
+        log.add("Core count "+CORE_COUNT);
         String pic = args[0];
         String res = args[1];
+        Boolean makeImage = Boolean.parseBoolean(args[2]);
         Integer[][] parsePicture = parsePicture(pic,false);
         length = parsePicture[0].length;
         width = parsePicture.length;
-//        oldStrat(parsePicture);
-        BufferedImage image = CCL.OptimizedAPI.optimizedStrategy(parsePicture);
-        ImageIO.write(image, "png", new File(res));
+        BufferedImage image = CCL.OptimizedAPI.optimizedStrategy(parsePicture,makeImage);
+        if(makeImage)
+            ImageIO.write(image, "png", new File(res));
+        PrintStream stream = new PrintStream(new BufferedOutputStream(new FileOutputStream(new File("log.txt"))));
+        for(String line:log){
+            stream.println(line);
+        }
+        stream.close();
     }
     public static iTableFunction print = new iTableFunction() {
             boolean firstPrint = true;
@@ -562,7 +569,7 @@ public class CCL {
         
     }
     
-    public static BufferedImage optimizedStrategy(Integer[][] pixels) throws InterruptedException{
+    public static BufferedImage optimizedStrategy(Integer[][] pixels,boolean makeImage) throws InterruptedException{
         MiniComponent[][] fromPixels = fromPixelArrayMini(pixels);
         
         boolean didTranspose = false;
@@ -593,7 +600,7 @@ public class CCL {
             for(int i=0; i+offset<shared.width; i+= increment){
                 int top = i;
                 int bot = i + offset;
-                System.out.println(top+" "+(bot));
+                log.add(top+" "+(bot));
                 WorkerMerger merger = new WorkerMerger(shared.comp,workers.get(top),workers.get(bot));
                 merger.dependencies.add(dependables.remove(bot).latch);
                 merger.dependencies.add(dependables.remove(top).latch);
@@ -602,7 +609,7 @@ public class CCL {
                 count++;
             }
             increment*=2;
-            System.out.println("#### "+increment +" parallelization: "+count);
+            log.add("#### "+increment +" parallelization: "+count);
         }while(increment/2<shared.width);
         
         ArrayList<DependableWorker> all = new ArrayList<>();
@@ -626,23 +633,28 @@ public class CCL {
         }
         transposeOverhead2 = System.currentTimeMillis() - transposeOverhead2;
 //        tableFunction(shared.comp,printLabel);
-        System.out.println("\n"+time);
-        System.out.println("transpose overhead "+ transposeOverhead +" "+transposeOverhead2);
-        System.out.println("Total:"+(time+ transposeOverhead + transposeOverhead2));
-        BufferedImage image = new BufferedImage(shared.length,shared.width,BufferedImage.TYPE_3BYTE_BGR);
-        for(MiniComponent comp:comps){
-            int val = comp.label.hashCode();
-            int red = val*70 % 255;
-            int blu = val*50 %255;
-            int green = val *60 % 255;
-            int rgb = new Color(red,green,blu).getRGB();
-            try{
-                image.setRGB(comp.location.x, comp.location.y, rgb);
-            }catch (Exception e){
-                System.out.println(comp.location);
+        log.add("\n"+time);
+        log.add("transpose overhead "+ transposeOverhead +" "+transposeOverhead2);
+        log.add("Total:"+(time+ transposeOverhead + transposeOverhead2));
+        
+        if(makeImage){
+            BufferedImage image = new BufferedImage(shared.length,shared.width,BufferedImage.TYPE_3BYTE_BGR);
+            for(MiniComponent comp:comps){
+                int val = comp.label.hashCode();
+                int red = val*70 % 255;
+                int blu = val*50 %255;
+                int green = val *60 % 255;
+                int rgb = new Color(red,green,blu).getRGB();
+                try{
+                    image.setRGB(comp.location.x, comp.location.y, rgb);
+                }catch (Exception e){
+                    System.out.println(comp.location);
+                }
             }
+            return image;
         }
-        return image;
+        return null;
+        
         
         
     }
