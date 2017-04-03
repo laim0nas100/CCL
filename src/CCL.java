@@ -191,6 +191,7 @@ public class CCL {
     
     
     public static class RosenfeldPfaltz {
+    public static int threadCount;
     public static AtomicInteger unionRequests = new AtomicInteger(0);
     public static SimpleComponent[][] fromPixelArraySimple(Integer[][] pixels){
         int width = pixels.length;
@@ -223,8 +224,13 @@ public class CCL {
                 unionRequests.decrementAndGet();
             }
         };
-        unionRequests.incrementAndGet();
-        unionService.submit(run);
+        if(threadCount==1){
+            run.run();
+        }else{
+            unionRequests.incrementAndGet();
+            unionService.submit(run); 
+        }
+        
     }
     public static void lookUpCache(final SimpleComponent comp){
         final int id = comp.intLabel;
@@ -388,26 +394,11 @@ public class CCL {
     }
     
     public static void strategy(SimpleShared shared, int threadCount) throws InterruptedException, Exception{
-//        iTableFunction printIntLabel = new iTableFunction() {
-//            String line = "";
-//            int maxWidth = 3;
-//            @Override
-//            public void onIteration(Object[][] array, int x, int y) {
-//                SimpleComponent name = (SimpleComponent)array[x][y];
-//                String app= name.intLabel+"";
-//                while(app.length()<maxWidth){
-//                    app+=" ";
-//                }
-//                line += app;               
-//            }
-//
-//            @Override
-//            public void onNewArray(Object[][] array, int x, int y) {
-//                Log.print(line);
-//                line = "";
-//            }
-//        };
-        exe = Executors.newFixedThreadPool(threadCount);
+        RosenfeldPfaltz.threadCount = threadCount;
+        if(threadCount==1){
+            threadCount++;
+        }
+        exe = Executors.newFixedThreadPool(threadCount-1);
         unionService = Executors.newSingleThreadExecutor();
         int width = shared.width();
         ArrayList<RowRemarker> workers = new ArrayList<>(width);
@@ -435,11 +426,6 @@ public class CCL {
         exe.shutdown();
         unionService.shutdown();
         unionService.awaitTermination(1, TimeUnit.DAYS);
-//        for(UFNode node:nodes.values()){
-//            Log.print(node);
-//        }
-//                tableFunction(shared.comp,printIntLabel);
-
     }
 }
     
