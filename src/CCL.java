@@ -210,6 +210,7 @@ public class CCL {
     public static AtomicInteger currentLabel = new AtomicInteger(1);
     public static ExecutorService exe;
     public static ExecutorService unionService;// = Executors.newSingleThreadExecutor();
+    public static LinkedBlockingDeque<Runnable> delayed = new LinkedBlockingDeque<>();
     public static void unionRequest(final int min, final int max){
         if(!uf.map.containsKey(min)){
             uf.add(min);
@@ -224,15 +225,10 @@ public class CCL {
                 unionRequests.decrementAndGet();
             }
         };
-        if(threadCount==1){
-            run.run();
-        }else{
-            unionRequests.incrementAndGet();
-            unionService.submit(run); 
-        }
-        
+        unionRequests.incrementAndGet();
+        unionService.submit(run);
     }
-    public static void lookUpCache(final SimpleComponent comp){
+    public static void lookUpCache(final SimpleComponent comp) throws InterruptedException{
         final int id = comp.intLabel;
         if(lookUpCache.containsKey(id)){
             comp.label = lookUpCache.get(id)+"";
@@ -249,7 +245,7 @@ public class CCL {
                             comp.label = find+"";
                         }
                     };
-                    unionService.submit(run);
+                    delayed.add(run);
                 }else{
                     int find = (int) uf.find(id);
                     lookUpCache.put(id, find);
@@ -393,7 +389,7 @@ public class CCL {
         
     }
     
-    public static void strategy(SimpleShared shared, int threadCount) throws InterruptedException, Exception{
+   public static void strategy(SimpleShared shared, int threadCount) throws InterruptedException, Exception{
         RosenfeldPfaltz.threadCount = threadCount;
         if(threadCount==1){
             threadCount++;
@@ -422,17 +418,26 @@ public class CCL {
             remarker.latch = latch2;
             exe.submit(remarker);
         }
-        latch2.await();
-        exe.shutdown();
+        
         unionService.shutdown();
         unionService.awaitTermination(1, TimeUnit.DAYS);
+        while(!delayed.isEmpty()){
+            exe.submit(delayed.takeFirst());
+        }
+        latch2.await();
+        while(!delayed.isEmpty()){
+            exe.submit(delayed.takeFirst());
+        }
+        exe.shutdown();
+        
+        exe.awaitTermination(1, TimeUnit.DAYS);
+        
     }
 }
     
     
     public static MiniShared shared;
     public static ArrayList<String> Log = new ArrayList<>();
-    public static ExecutorService pool;
     public static final int CORE_COUNT = Runtime.getRuntime().availableProcessors();
     public static int THREAD_COUNT = CORE_COUNT;
     
