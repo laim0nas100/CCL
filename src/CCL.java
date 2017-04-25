@@ -191,249 +191,221 @@ public class CCL {
     
     
     public static class RosenfeldPfaltz {
-    public static int threadCount;
-    public static AtomicInteger unionRequests = new AtomicInteger(0);
-    public static SimpleComponent[][] fromPixelArraySimple(Integer[][] pixels){
-        int width = pixels.length;
-        int length = pixels[0].length;
-        SimpleComponent[][] array = new SimpleComponent[width][length];
-        for(int i=0;i<width;i++){
-            for(int j=0; j<length; j++){
-                SimpleComponent comp = new SimpleComponent(i,j,pixels[i][j]);
-                array[i][j] = comp; 
-            }
-        } 
-        return array;
-    }
-    public static HashMap<Integer,Integer> lookUpCache = new HashMap<>();
-    public static UnionFind uf = new UnionFind();
-    public static AtomicInteger currentLabel = new AtomicInteger(1);
-    public static ExecutorService exe;
-    public static ExecutorService unionService;// = Executors.newSingleThreadExecutor();
-    public static LinkedBlockingDeque<Runnable> delayed = new LinkedBlockingDeque<>();
-    public static void unionRequest(final int min, final int max){
-        if(!uf.map.containsKey(min)){
-            uf.add(min);
-        } 
-        if(!uf.map.containsKey(max)){
-            uf.add(max);  
+        public static ReadWriteLock lock = new ReadWriteLock();
+    
+        public static int threadCount;
+        public static AtomicInteger unionRequests = new AtomicInteger(0);
+        public static SimpleComponent[][] fromPixelArraySimple(Integer[][] pixels){
+            int width = pixels.length;
+            int length = pixels[0].length;
+            SimpleComponent[][] array = new SimpleComponent[width][length];
+            for(int i=0;i<width;i++){
+                for(int j=0; j<length; j++){
+                    SimpleComponent comp = new SimpleComponent(i,j,pixels[i][j]);
+                    array[i][j] = comp; 
+                }
+            } 
+            return array;
         }
-        Runnable run = new Runnable(){
-            @Override
-            public void run() {
-                uf.union(min, max);
-                unionRequests.decrementAndGet();
+        public static HashMap<Integer,Integer> lookUpCache = new HashMap<>();
+        public static UnionFind uf = new UnionFind();
+        public static AtomicInteger currentLabel = new AtomicInteger(1);
+        public static ExecutorService exe;
+        public static LinkedBlockingDeque<Runnable> delayed = new LinkedBlockingDeque<>();
+        public static void unionRequest(final int min, final int max) throws InterruptedException{
+            lock.lockWrite();
+            if(!uf.map.containsKey(min)){
+                uf.add(min);
+            } 
+            if(!uf.map.containsKey(max)){
+                uf.add(max);  
             }
-        };
-        unionRequests.incrementAndGet();
-        unionService.submit(run);
-    }
-    public static void lookUpCache(final SimpleComponent comp) throws InterruptedException{
-        final int id = comp.intLabel;
-        if(lookUpCache.containsKey(id)){
-            comp.label = lookUpCache.get(id)+"";
-        }else{
-            if(!uf.map.containsKey(id)){
-                comp.label = id+"";
+            
+            uf.union(min, max);
+            lock.unlockWrite();
+        }
+        public static void lookUpCache(final SimpleComponent comp) throws InterruptedException{
+            final int id = comp.intLabel;
+            if(lookUpCache.containsKey(id)){
+                comp.label = lookUpCache.get(id)+"";
             }else{
-                if(unionRequests.get()>0){
-                    Runnable run = new Runnable() {
-                        @Override
-                        public void run() {
-                            int find = (int) uf.find(id);
-                            lookUpCache.put(id, find);
-                            comp.label = find+"";
-                        }
-                    };
-                    delayed.add(run);
+                if(!uf.map.containsKey(id)){
+                    comp.label = id+"";
                 }else{
+                    lock.lockRead();
                     int find = (int) uf.find(id);
                     lookUpCache.put(id, find);
                     comp.label = find+""; 
-                }
-                
-                
-            }
-        }
-        
-    }
-    public static class SimpleShared extends MiniShared{
-        public SimpleShared(SimpleComponent[][] array){
-            super(array);
-        }
-        @Override
-        protected SimpleComponent get(int y, int x){
-            if(y<this.width() && x<this.length()){
-                return (SimpleComponent) this.comp[y][x];
-            }else{
-                return null;
-            }
-        }
-        @Override
-        protected SimpleComponent get(Pos pos){
-            if(pos == null){
-                return null;
-            }
-            return get(pos.y,pos.x);
-        }
-    }
-    public static class SimpleComponent extends MiniComponent{
-        public int intLabel;
-        public SimpleComponent(int Y, int X, int id) {
-            super(Y, X, id);
-            intLabel = 0;
-        }
-        
-        
-    }
-    public static class RowMarker extends RowRemarker implements Callable{
-        public LinkedBlockingDeque<SimpleComponent> row;
-        public RowMarker topRow;
+                    lock.unlockRead();
 
-        
-        public RowMarker(SimpleShared shared,int rowIndex,RowMarker dependency){
-            super(shared,rowIndex);
-            this.topRow = dependency;
-            this.row = new LinkedBlockingDeque<>(shared.length()+1);
-        }
-        
-        @Override
-        public Object call() throws Exception {
-//            Log.print("Started "+rowIndex);
-            int size = shared.length();
-            if(rowIndex == 0){//I AM FIRST
-                SimpleComponent temp = shared.get(0, 0);
-                temp.intLabel = currentLabel.get();
-                row.putLast(temp);
-                for(int i=1;i<size;i++){
-                    SimpleComponent get = shared.get(rowIndex, i);
-                    SimpleComponent left = shared.get(rowIndex, i-1);
-                    if(left.id == get.id){
-                        get.intLabel = left.intLabel;
-                    }else{
-                        get.intLabel = currentLabel.incrementAndGet();
-                    }
-                    row.putLast(get);
+
                 }
-            }else{
-                SimpleComponent get = shared.get(rowIndex, 0);
-                SimpleComponent top = topRow.row.takeFirst();
-                if(get.id == top.id){
-                    get.intLabel = top.intLabel;
+            }
+
+        }
+        public static class SimpleShared extends MiniShared{
+            public SimpleShared(SimpleComponent[][] array){
+                super(array);
+            }
+            @Override
+            protected SimpleComponent get(int y, int x){
+                if(y<this.width() && x<this.length()){
+                    return (SimpleComponent) this.comp[y][x];
                 }else{
-                    get.intLabel = currentLabel.incrementAndGet();
+                    return null;
                 }
-                row.putLast(get);
-                SimpleComponent left;
-                for(int i=1;i<size;i++){
-//                    Log.print(i);
-                    get = shared.get(rowIndex, i);
-                    left = shared.get(rowIndex, i-1);
-                    top = topRow.row.takeFirst();
-                    if(top.id != get.id && left.id != get.id){
-                        get.intLabel = currentLabel.incrementAndGet();
-                    }else if(top.id == get.id && left.id != get.id){
-                        get.intLabel = top.intLabel;
-                    }else if(top.id != get.id && left.id == get.id){
-                        get.intLabel = left.intLabel;
-                    }else if(top.id == get.id && left.id == get.id){
-                        if(left.intLabel!= top.intLabel){ // add relation
-                            int min,max;
-                         
-                            if(left.intLabel>top.intLabel){
-                                max = left.intLabel;
-                                min = top.intLabel;
-                            }else{
-                                min = left.intLabel;
-                                max = top.intLabel;
-                            }
-                            get.intLabel = min;
-                            unionRequest(min,max);
-                            
-                        }else {
-                            get.intLabel = top.intLabel;
+            }
+            protected SimpleComponent get(Pos pos){
+                if(pos == null){
+                    return null;
+                }
+                return get(pos.y,pos.x);
+            }
+        }
+        public static class SimpleComponent extends MiniComponent{
+            public int intLabel;
+            public SimpleComponent(int Y, int X, int id) {
+                super(Y, X, id);
+                intLabel = 0;
+            }
+
+
+        }
+        public static class RowMarker extends RowRemarker implements Callable{
+            public LinkedBlockingDeque<SimpleComponent> row;
+            public RowMarker topRow;
+
+
+            public RowMarker(SimpleShared shared,int rowIndex,RowMarker dependency){
+                super(shared,rowIndex);
+                this.topRow = dependency;
+                this.row = new LinkedBlockingDeque<>(shared.length()+1);
+            }
+
+            @Override
+            public Object call() throws Exception {
+    //            Log.print("Started "+rowIndex);
+                int size = shared.length();
+                if(rowIndex == 0){//I AM FIRST
+                    SimpleComponent temp = shared.get(0, 0);
+                    temp.intLabel = currentLabel.get();
+                    row.putLast(temp);
+                    for(int i=1;i<size;i++){
+                        SimpleComponent get = shared.get(rowIndex, i);
+                        SimpleComponent left = shared.get(rowIndex, i-1);
+                        if(left.id == get.id){
+                            get.intLabel = left.intLabel;
+                        }else{
+                            get.intLabel = currentLabel.incrementAndGet();
                         }
+                        row.putLast(get);
+                    }
+                }else{
+                    SimpleComponent get = shared.get(rowIndex, 0);
+                    SimpleComponent top = topRow.row.takeFirst();
+                    if(get.id == top.id){
+                        get.intLabel = top.intLabel;
                     }else{
                         get.intLabel = currentLabel.incrementAndGet();
                     }
                     row.putLast(get);
-                }
-            }
-//            Log.print(this.row.toString());
-//            Log.print("Finished "+rowIndex);
-            latch.countDown();
-            return null;
-        }
-        
-    }
-    
-    public static class RowRemarker implements Callable{
-        public int rowIndex;
-        public SimpleShared shared;
-        public CountDownLatch latch;
-        public RowRemarker(SimpleShared shared,int rowIndex){
-            this.rowIndex = rowIndex;
-            this.shared = shared;
-        }
-        @Override
-        public Object call() throws Exception {
-            int size = shared.length();
-            for(int i=0; i<size; i++){
-                
-                SimpleComponent get = shared.get(rowIndex, i);
-                lookUpCache(get);
-            }
-            latch.countDown();
-            return null;
-        }
-        
-    }
-    
-   public static void strategy(SimpleShared shared, int threadCount) throws InterruptedException, Exception{
-        RosenfeldPfaltz.threadCount = threadCount;
-        if(threadCount==1){
-            threadCount++;
-        }
-        exe = Executors.newFixedThreadPool(threadCount-1);
-        unionService = Executors.newSingleThreadExecutor();
-        int width = shared.width();
-        ArrayList<RowRemarker> workers = new ArrayList<>(width);
-        RowMarker marker = new RowMarker(shared,0,null);
-        workers.add(marker);
-        for(int i=1; i<width; i++){
-            RowMarker next = new RowMarker(shared,i,marker);
-            marker = next;
-            workers.add(next);
-        }
-        CountDownLatch latch = new CountDownLatch(width);
+                    SimpleComponent left;
+                    for(int i=1;i<size;i++){
+    //                    Log.print(i);
+                        get = shared.get(rowIndex, i);
+                        left = shared.get(rowIndex, i-1);
+                        top = topRow.row.takeFirst();
+                        if(top.id != get.id && left.id != get.id){
+                            get.intLabel = currentLabel.incrementAndGet();
+                        }else if(top.id == get.id && left.id != get.id){
+                            get.intLabel = top.intLabel;
+                        }else if(top.id != get.id && left.id == get.id){
+                            get.intLabel = left.intLabel;
+                        }else if(top.id == get.id && left.id == get.id){
+                            if(left.intLabel!= top.intLabel){ // add relation
+                                int min,max;
 
-        for(RowRemarker cal:workers){
-            cal.latch = latch;
-            exe.submit(cal);
+                                if(left.intLabel>top.intLabel){
+                                    max = left.intLabel;
+                                    min = top.intLabel;
+                                }else{
+                                    min = left.intLabel;
+                                    max = top.intLabel;
+                                }
+                                get.intLabel = min;
+                                unionRequest(min,max);
+
+                            }else {
+                                get.intLabel = top.intLabel;
+                            }
+                        }else{
+                            get.intLabel = currentLabel.incrementAndGet();
+                        }
+                        row.putLast(get);
+                    }
+                }
+    //            Log.print(this.row.toString());
+    //            Log.print("Finished "+rowIndex);
+                latch.countDown();
+                return null;
+            }
+
         }
-        latch.await();
-        CountDownLatch latch2 = new CountDownLatch(width);
-        for(int i=0; i<width; i++){
-            RowRemarker remarker = new RowRemarker(shared,i);
-            remarker.latch = latch2;
-            exe.submit(remarker);
+
+        public static class RowRemarker implements Callable{
+            public int rowIndex;
+            public SimpleShared shared;
+            public CountDownLatch latch;
+            public RowRemarker(SimpleShared shared,int rowIndex){
+                this.rowIndex = rowIndex;
+                this.shared = shared;
+            }
+            @Override
+            public Object call() throws Exception {
+                int size = shared.length();
+                for(int i=0; i<size; i++){
+
+                    SimpleComponent get = shared.get(rowIndex, i);
+                    lookUpCache(get);
+                }
+                latch.countDown();
+                return null;
+            }
+
         }
-        
-        unionService.shutdown();
-        unionService.awaitTermination(1, TimeUnit.DAYS);
-        while(!delayed.isEmpty()){
-            exe.submit(delayed.takeFirst());
+
+        public static void strategy(SimpleShared shared, int threadCount) throws InterruptedException, Exception{
+            RosenfeldPfaltz.threadCount = threadCount;
+            if(threadCount==1){
+                threadCount++;
+            }
+            exe = Executors.newFixedThreadPool(threadCount);
+            int width = shared.width();
+            ArrayList<RowRemarker> workers = new ArrayList<>(width);
+            RowMarker marker = new RowMarker(shared,0,null);
+            workers.add(marker);
+            for(int i=1; i<width; i++){
+                RowMarker next = new RowMarker(shared,i,marker);
+                marker = next;
+                workers.add(next);
+            }
+            CountDownLatch latch = new CountDownLatch(width);
+
+            for(RowRemarker cal:workers){
+                cal.latch = latch;
+                exe.submit(cal);
+            }
+            latch.await();
+            CountDownLatch latch2 = new CountDownLatch(width);
+            for(int i=0; i<width; i++){
+                RowRemarker remarker = new RowRemarker(shared,i);
+                remarker.latch = latch2;
+                exe.submit(remarker);
+            }
+            latch2.await();
+
         }
-        latch2.await();
-        while(!delayed.isEmpty()){
-            exe.submit(delayed.takeFirst());
-        }
-        exe.shutdown();
-        
-        exe.awaitTermination(1, TimeUnit.DAYS);
-        
     }
-}
     
     
     public static MiniShared shared;
