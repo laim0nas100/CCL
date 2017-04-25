@@ -3,7 +3,6 @@
 
 /**
  *
- * @author Laimonas Beniušis
  * Semaphore
  * 
  */
